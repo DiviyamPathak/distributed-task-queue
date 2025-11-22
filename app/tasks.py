@@ -1,4 +1,4 @@
-from .celery_app import app
+from app.celery_app import app
 from .idempotency import claim_once
 import time
 import random
