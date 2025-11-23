@@ -1,7 +1,8 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from .tasks import ingest_csv, generate_report, send_email, deliver_webhook
-from .util import gen_client_request_id, sample_tenants
+from .util import gen_client_request_id, tenants
+from .rate_limiter import enforce_quota
 from typing import Optional
 
 app = FastAPI(title="Multi-tenant Task API")
@@ -29,10 +30,12 @@ class EnqueueWebhook(BaseModel):
     payload: dict
     client_request_id: Optional[str] = None
 
+@enforce_quota()
 @app.get("/tenants")
 def list_tenants():
-    return sample_tenants()
+    return tenants()
 
+@enforce_quota()
 @app.post("/enqueue/ingest")
 def api_ingest(payload: EnqueueIngest):
     client_id = payload.client_request_id or gen_client_request_id(payload.tenant_id, "ingest")
@@ -43,6 +46,7 @@ def api_ingest(payload: EnqueueIngest):
     })
     return {"task_id": task.id, "client_request_id": client_id}
 
+@enforce_quota()
 @app.post("/enqueue/report")
 def api_report(payload: EnqueueReport):
     client_id = payload.client_request_id or gen_client_request_id(payload.tenant_id, "report")
@@ -53,6 +57,7 @@ def api_report(payload: EnqueueReport):
     })
     return {"task_id": task.id, "client_request_id": client_id}
 
+@enforce_quota()
 @app.post("/enqueue/email")
 def api_email(payload: EnqueueEmail):
     client_id = payload.client_request_id or gen_client_request_id(payload.tenant_id, "email")
@@ -65,6 +70,7 @@ def api_email(payload: EnqueueEmail):
     })
     return {"task_id": task.id, "client_request_id": client_id}
 
+@enforce_quota()
 @app.post("/enqueue/webhook")
 def api_webhook(payload: EnqueueWebhook):
     client_id = payload.client_request_id or gen_client_request_id(payload.tenant_id, "webhook")
