@@ -17,3 +17,40 @@ flowchart LR
   KEDA ---|scale| Workers
   Billing[Billing service] <---|usage data| RedisRate
 ```
+
+### Completed
+1. API server
+2. Celery Tasks and app setup
+3. Rate limiting and quota
+4. Logic for CSV and all task processing logic
+
+
+### Inprogress
+1.CI/CD pipeline and kubernetes deployment
+
+
+### Running locally
+run first time
+```
+docker compose up --build
+```
+
+remove
+
+```
+docker compose down
+
+```
+
+delete 
+
+```
+sudo docker rmi -f xxx_id
+
+
+sudo docker volume rm xxx_id
+
+
+sudo docker network rm xxx_id
+
+```

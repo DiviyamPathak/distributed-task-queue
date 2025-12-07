@@ -5,6 +5,7 @@ BROKER = os.getenv("BROKER_URL", "amqp://guest:guest@rabbitmq:5672//")
 BACKEND = os.getenv("RESULT_BACKEND", "redis://redis:6379/0")
 
 app = Celery("mtasks", broker=BROKER, backend=BACKEND)
+app.autodiscover_tasks(['app'])
 
 app.conf.update(
     task_serializer="json",

@@ -1,14 +1,21 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from .tasks import ingest_csv, generate_report, send_email, deliver_webhook
-from .util import gen_client_request_id, sample_tenants
+from .util import gen_client_request_id, tenants
+from .rate_limiter import enforce_quota
 from typing import Optional
+from .db import init_db
 
 app = FastAPI(title="Multi-tenant Task API")
+
+@app.on_event("startup")
+def startup():
+    init_db()
 
 class EnqueueIngest(BaseModel):
     tenant_id: str
     s3_path: str
+    source: str
     client_request_id: Optional[str] = None
 
 class EnqueueReport(BaseModel):
@@ -31,18 +38,23 @@ class EnqueueWebhook(BaseModel):
 
 @app.get("/tenants")
 def list_tenants():
-    return sample_tenants()
+    return tenants()
 
+@enforce_quota()
 @app.post("/enqueue/ingest")
-def api_ingest(payload: EnqueueIngest):
-    client_id = payload.client_request_id or gen_client_request_id(payload.tenant_id, "ingest")
+def api_fintech_ingest(payload: EnqueueIngest):
+    client_id = payload.client_request_id or gen_client_request_id(payload.tenant_id, "fintech_ingest")
+
     task = ingest_csv.apply_async(kwargs={
         "tenant_id": payload.tenant_id,
         "s3_path": payload.s3_path,
+        "source": payload.source,
         "client_request_id": client_id
     })
+
     return {"task_id": task.id, "client_request_id": client_id}
 
+@enforce_quota()
 @app.post("/enqueue/report")
 def api_report(payload: EnqueueReport):
     client_id = payload.client_request_id or gen_client_request_id(payload.tenant_id, "report")
@@ -53,6 +65,7 @@ def api_report(payload: EnqueueReport):
     })
     return {"task_id": task.id, "client_request_id": client_id}
 
+@enforce_quota()
 @app.post("/enqueue/email")
 def api_email(payload: EnqueueEmail):
     client_id = payload.client_request_id or gen_client_request_id(payload.tenant_id, "email")
@@ -65,6 +78,7 @@ def api_email(payload: EnqueueEmail):
     })
     return {"task_id": task.id, "client_request_id": client_id}
 
+@enforce_quota()
 @app.post("/enqueue/webhook")
 def api_webhook(payload: EnqueueWebhook):
     client_id = payload.client_request_id or gen_client_request_id(payload.tenant_id, "webhook")
