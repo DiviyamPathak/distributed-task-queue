@@ -40,8 +40,8 @@ def list_tenants():
     return tenants()
 
 @enforce_quota()
-@app.post("/enqueue/fintech/ingest")
-def api_fintech_ingest(payload: EnqueueFintechCSV):
+@app.post("/enqueue/ingest")
+def api_fintech_ingest(payload: EnqueueIngest):
     client_id = payload.client_request_id or gen_client_request_id(payload.tenant_id, "fintech_ingest")
 
     task = ingest_csv.apply_async(kwargs={
