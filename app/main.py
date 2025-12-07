@@ -15,6 +15,7 @@ def startup():
 class EnqueueIngest(BaseModel):
     tenant_id: str
     s3_path: str
+    source: str
     client_request_id: Optional[str] = None
 
 class EnqueueReport(BaseModel):
