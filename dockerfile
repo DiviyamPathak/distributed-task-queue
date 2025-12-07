@@ -10,5 +10,4 @@ COPY . .
 
 ENV PYTHONPATH=/app
 
-# default command for API; override for worker/flower
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

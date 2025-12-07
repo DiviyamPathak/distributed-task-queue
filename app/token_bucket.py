@@ -1,48 +1,34 @@
 import time
 import redis
+from pathlib import Path
 
+# Redis connection
 r = redis.Redis(host="redis", port=6379, db=0)
 
-TOKEN_BUCKET_LUA = """
-local key_tokens = KEYS[1]
-local key_time = KEYS[2]
+# Load Lua script once at startup
+LUA_SCRIPT_PATH = Path(__file__).with_name("token_bucket.lua")
 
-local max_tokens = tonumber(ARGV[1])
-local refill_rate = tonumber(ARGV[2])
-local now = tonumber(ARGV[3])
-local requested = tonumber(ARGV[4])
+with open(LUA_SCRIPT_PATH, "r") as f:
+    TOKEN_BUCKET_LUA = f.read()
 
--- read state or initialize
-local tokens = tonumber(redis.call("GET", key_tokens) or max_tokens)
-local last = tonumber(redis.call("GET", key_time) or now)
+# Optional: cache script in Redis and use SHA for faster execution
+TOKEN_BUCKET_SHA = r.script_load(TOKEN_BUCKET_LUA)
 
--- refill
-local delta = math.max(0, now - last)
-local refill = math.floor(delta * refill_rate)
-tokens = math.min(max_tokens, tokens + refill)
 
--- check quota
-if tokens < requested then
-  redis.call("SET", key_tokens, tokens)
-  redis.call("SET", key_time, now)
-  return 0
-else
-  tokens = tokens - requested
-  redis.call("SET", key_tokens, tokens)
-  redis.call("SET", key_time, now)
-  return 1
-end
-"""
-
-def try_consume(tenant_id: str, requested: int = 1):
-    max_tokens = 50          
-    refill_rate = 10         
+def try_consume(tenant_id: str, requested: int = 1) -> bool:
+    max_tokens = 50
+    refill_rate = 10
     now = int(time.time())
 
-    return r.eval(
-        TOKEN_BUCKET_LUA,
+    result = r.evalsha(
+        TOKEN_BUCKET_SHA,
         2,
         f"tenant:{tenant_id}:tokens",
         f"tenant:{tenant_id}:last_refill",
-        max_tokens, refill_rate, now, requested
-    ) == 1
+        max_tokens,
+        refill_rate,
+        now,
+        requested
+    )
+
+    return result == 1

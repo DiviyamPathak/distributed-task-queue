@@ -21,10 +21,13 @@ flowchart LR
 ### Completed
 1. API server
 2. Celery Tasks and app setup
-3. Rate limiting and quaota
+3. Rate limiting and quota
+4. Logic for CSV and all task processing logic
+
 
 ### Inprogress
-1. Logic for CSV and all task processing logic
+1.CI/CD pipeline and kubernetes deployment
+
 
 ### Running locally
 run first time
