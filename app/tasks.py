@@ -1,6 +1,7 @@
 from app.celery_app import app
 from .idempotency import claim_once
 from .db import get_conn
+from psycopg2.extras import Json
 
 import csv
 import os
@@ -33,33 +34,46 @@ def ingest_csv(self, tenant_id: str, s3_path: str, source: str, client_request_i
 
         for row in reader:
             try:
-                txn_id = row.get("upi_txn_id") or row.get("imps_txn_id") or row.get("neft_txn_id") or row.get("transaction_reference")
+                txn_id = row.get("upi_txn_id")
+                if not txn_id:
+                    raise ValueError("txn_id missing")
+
                 amount = float(row.get("amount", 0))
 
                 cur.execute("""
                     INSERT INTO fintech_transactions
                     (tenant_id, source, txn_id, reference_id, account_id,
-                     counterparty_account, vpa_or_ifsc, amount, currency,
-                     status, txn_timestamp, raw_row)
+                    counterparty_account, vpa_or_ifsc, amount, currency,
+                    status, txn_timestamp, raw_row)
                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT DO NOTHING
                 """, (
                     tenant_id,
                     source,
                     txn_id,
-                    row.get("rrn") or row.get("utr") or row.get("stan"),
-                    row.get("payer_vpa") or row.get("account_number") or row.get("sender_account"),
-                    row.get("payee_vpa") or row.get("beneficiary_account") or row.get("receiver_account"),
+                    row.get("rrn"),
+                    row.get("payer_vpa"),
+                    row.get("payee_vpa"),
                     row.get("ifsc"),
                     amount,
                     row.get("currency", "INR"),
-                    row.get("txn_status") or row.get("status"),
-                    row.get("txn_timestamp") or row.get("txn_date"),
-                    row
+                    row.get("txn_status"),
+                    row.get("txn_timestamp"),
+                    Json(row) 
                 ))
-                inserted += 1
-            except Exception:
+
+                if cur.rowcount == 1:
+                    inserted += 1
+
+            except Exception as e:
                 failed += 1
+                logger.error(
+                    "[%s] Failed row %s | error=%s",
+                    tenant_id,
+                    row,
+                    str(e)
+                )
+
 
     conn.commit()
     conn.close()
@@ -111,17 +125,76 @@ def generate_report(self, tenant_id: str, report_type: str, client_request_id: s
     if client_request_id and not claim_once(client_request_id):
         return {"status": "duplicate"}
 
-    report_path = f"/app/reports/{tenant_id}-{self.request.id}.txt"
+    conn = get_conn()
+    cur = conn.cursor()
 
+    report_path = f"/app/reports/{tenant_id}-{report_type}-{self.request.id}.txt"
     os.makedirs("/app/reports", exist_ok=True)
 
     with open(report_path, "w") as f:
         f.write(f"Tenant: {tenant_id}\n")
-        f.write(f"Report type: {report_type}\n")
+        f.write(f"Report type: {report_type}\n\n")
+
+        if report_type == "DAILY_SUMMARY":
+            cur.execute("""
+                SELECT DATE(txn_timestamp), COUNT(*), SUM(amount),
+                       COUNT(*) FILTER (WHERE status = 'SUCCESS'),
+                       COUNT(*) FILTER (WHERE status != 'SUCCESS')
+                FROM fintech_transactions
+                WHERE tenant_id = %s
+                GROUP BY DATE(txn_timestamp)
+                ORDER BY DATE(txn_timestamp) DESC
+            """, (tenant_id,))
+
+            f.write("Date | Total | Amount | Success | Failed\n")
+            f.write("-" * 50 + "\n")
+
+            for row in cur.fetchall():
+                f.write(f"{row[0]} | {row[1]} | {row[2]} | {row[3]} | {row[4]}\n")
+
+        elif report_type == "SOURCE_SUMMARY":
+            cur.execute("""
+                SELECT source, COUNT(*), SUM(amount),
+                       COUNT(*) FILTER (WHERE status = 'SUCCESS'),
+                       COUNT(*) FILTER (WHERE status != 'SUCCESS')
+                FROM fintech_transactions
+                WHERE tenant_id = %s
+                GROUP BY source
+            """, (tenant_id,))
+
+            f.write("Source | Total | Amount | Success | Failed\n")
+            f.write("-" * 50 + "\n")
+
+            for row in cur.fetchall():
+                f.write(f"{row[0]} | {row[1]} | {row[2]} | {row[3]} | {row[4]}\n")
+
+        elif report_type == "RECONCILIATION":
+            cur.execute("""
+                SELECT mismatch_type, COUNT(*)
+                FROM reconciliations
+                WHERE tenant_id = %s
+                GROUP BY mismatch_type
+            """, (tenant_id,))
+
+            f.write("Mismatch Type | Count\n")
+            f.write("-" * 30 + "\n")
+
+            for row in cur.fetchall():
+                f.write(f"{row[0]} | {row[1]}\n")
+
+        else:
+            f.write("Unknown report type\n")
+
+    conn.close()
 
     logger.info("[%s] report generated: %s", tenant_id, report_path)
 
-    return {"status": "ok", "path": report_path}
+    return {
+        "status": "ok",
+        "report_type": report_type,
+        "path": report_path
+    }
+
 
 
 @app.task(bind=True, max_retries=3, default_retry_delay=5)
@@ -136,32 +209,24 @@ def send_email(self, tenant_id: str, to: str, subject: str, body: str, client_re
         msg["To"] = to
         msg["Subject"] = subject
         msg.set_content(body)
-
         smtp = smtplib.SMTP("mailhog", 1025)  # use MailHog in docker
         smtp.send_message(msg)
         smtp.quit()
-
         logger.info("[%s] email sent to %s", tenant_id, to)
-
         return {"status": "sent"}
 
     except Exception as e:
         raise self.retry(exc=e)
 
-
 @app.task(bind=True, max_retries=3, default_retry_delay=5)
 def deliver_webhook(self, tenant_id: str, url: str, payload: dict, client_request_id: str = None):
-
     if client_request_id and not claim_once(client_request_id):
         return {"status": "duplicate"}
-
     try:
         with httpx.Client(timeout=5) as client:
             resp = client.post(url, json=payload)
             resp.raise_for_status()
-
         logger.info("[%s] webhook delivered %s", tenant_id, url)
         return {"status": "delivered"}
-
     except Exception as e:
         raise self.retry(exc=e)

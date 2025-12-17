@@ -50,6 +50,7 @@ services:
     command: celery -A app.celery_app worker --loglevel=info
     volumes:
       - ./:/app
+      - ./data:/app/data
     depends_on:
       - rabbitmq
       - redis
