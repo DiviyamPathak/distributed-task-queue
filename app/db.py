@@ -12,22 +12,9 @@ POSTGRES_USER = os.getenv("POSTGRES_USER")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 
 MAX_RETRIES = 10
-INITIAL_DELAY = 1  # seconds
+INITIAL_DELAY = 3  # seconds
 
-# Initialize a connection pool
-try:
-    connection_pool = pool.SimpleConnectionPool(
-        minconn=1,
-        maxconn=10,  # Adjust maxconn based on your expected load
-        host=POSTGRES_HOST,
-        dbname=POSTGRES_DB,
-        user=POSTGRES_USER,
-        password=POSTGRES_PASSWORD,
-    )
-except OperationalError as e:
-    print(f"Failed to create connection pool: {e}")
-    connection_pool = None
-
+connection_pool = None
 
 def get_conn():
     if not connection_pool:
@@ -44,10 +31,24 @@ def init_db():
     Safe for Docker, Kubernetes, restarts.
     """
     conn = None
+    cur = None
+    global connection_pool
     delay = INITIAL_DELAY
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
+            if not connection_pool:
+                print(f"Attempting to create connection pool (attempt {attempt}/{MAX_RETRIES})...")
+                connection_pool = pool.SimpleConnectionPool(
+                    minconn=1,
+                    maxconn=10,
+                    host=POSTGRES_HOST,
+                    dbname=POSTGRES_DB,
+                    user=POSTGRES_USER,
+                    password=POSTGRES_PASSWORD,
+                )
+                print("Connection pool created.")
+
             conn = get_conn()
             cur = conn.cursor()
 
@@ -88,7 +89,6 @@ def init_db():
             """)
 
             conn.commit()
-            cur.close()
 
             print(" Database initialized successfully")
             return
@@ -99,7 +99,10 @@ def init_db():
             )
             time.sleep(delay)
             delay = min(delay * 2, 30)
+            connection_pool = None
         finally:
+            if cur:
+                cur.close()
             if conn:
                 put_conn(conn)
 
