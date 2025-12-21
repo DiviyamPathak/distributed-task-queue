@@ -23,11 +23,14 @@ flowchart LR
 2. Celery Tasks and app setup
 3. Rate limiting and quota
 4. Logic for CSV and all task processing logic
+5. CI/CD pipeline and kubernetes deployment
 
 
 ### Inprogress
-1.CI/CD pipeline and kubernetes deployment
-
+1. frontend 
+2. CD
+3. Deployment
+4. Cloud Volume
 
 ### Running locally
 run first time
@@ -58,6 +61,7 @@ sudo docker network rm xxx_id
 .env file with with DB parameters
 
 # Dev Testing 
+
 ## API server 
 ```
 curl -X POST http://localhost:8000/enqueue/ingest \
@@ -141,3 +145,7 @@ erDiagram
 | `raw_row`              | Full raw source record (JSONB)                      |
 | `created_at`           | Ingestion timestamp                                 |
 
+
+# CI/CD Pipeline
+
+Github actions and K
