@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: beat
+  namespace: mtasks
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: beat
+  template:
+    metadata:
+      labels:
+        app: beat
+    spec:
+      containers:
+      - name: beat
+        image: task-platform:dev
+        imagePullPolicy: IfNotPresent
+        command: ["celery"]
+        args: ["-A", "app.celery_app", "beat", "--loglevel=info"]
